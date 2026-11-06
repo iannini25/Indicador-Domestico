@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 
 import pandas as pd
@@ -6,7 +7,7 @@ import streamlit as st
 
 
 st.set_page_config(
-    page_title="Afaseres Domésticos | Indicadores",
+    page_title="Afazeres Domésticos | Indicadores",
     page_icon="🏠",
     layout="wide",
 )
@@ -26,7 +27,17 @@ COLUNAS = [
 
 @st.cache_data
 def carregar_dados(arquivo):
+    if isinstance(arquivo, bytes):
+        arquivo = io.BytesIO(arquivo)
+
     planilha = pd.ExcelFile(arquivo)
+
+    titulo = str(pd.read_excel(planilha, sheet_name=planilha.sheet_names[0], header=None).iloc[0, 0])
+    if "cor ou ra" not in titulo.lower():
+        raise ValueError(
+            "a planilha não é a Tabela 1.1.1 (horas semanais por sexo e cor ou raça)"
+        )
+
     registros = []
 
     for ano in planilha.sheet_names:
@@ -65,25 +76,43 @@ st.markdown(
     .block-container {padding-top: 2rem; padding-bottom: 3rem;}
     [data-testid="stMetric"] { padding: 1rem 1.2rem; border-radius: 14px; border: 1px solid #e5eaf2;}
     .intro {color: #586579; font-size: 1.05rem; max-width: 850px;}
-    .note {Raçaground: #fff8e8; border-left: 4px solid #e8a838; padding: 0.85rem 1rem; border-radius: 8px; color: #55451f;}
+    .note {background: #fff8e8; border-left: 4px solid #e8a838; padding: 0.85rem 1rem; border-radius: 8px; color: #55451f;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("🏠 Cuidados e afaseres domésticos no Brasil")
+st.title("🏠 Cuidados e afazeres domésticos no Brasil")
 st.markdown(
-    '<p class="intro">Quantas horas por semana as pesssoas dedicam ao trabalho de cuidado não remunerado? '
+    '<p class="intro">Quantas horas por semana as pessoas dedicam ao trabalho de cuidado não remunerado? '
     "Explore as diferenças entre homens e mulheres, raça/cor e unidades da Federação.</p>",
     unsafe_allow_html=True,
 )
 
 
-if not ARQUIVO_DADOS.exists():
-    st.error("Não encontrei a planilha. Confira se o arquivo está na pasta conteudo.")
-    st.stop()
+with st.sidebar:
+    st.header("Dados")
+    arquivo_enviado = st.file_uploader(
+        "Enviar outra planilha (.xls ou .xlsx)",
+        type=["xls", "xlsx"],
+        help="A planilha precisa seguir o formato da Tabela 1.1.1 do IBGE. Sem envio, usamos a planilha do projeto.",
+    )
 
-dados = carregar_dados(str(ARQUIVO_DADOS))
+if arquivo_enviado is not None:
+    try:
+        dados = carregar_dados(arquivo_enviado.getvalue())
+        st.sidebar.success(f"Usando: {arquivo_enviado.name}")
+    except Exception as erro:
+        st.sidebar.error(f"Não consegui ler o arquivo enviado: {erro}")
+        st.error("O arquivo enviado não pôde ser lido. Envie uma planilha no formato da Tabela 1.1.1 do IBGE.")
+        st.stop()
+else:
+    if not ARQUIVO_DADOS.exists():
+        st.error("Não encontrei a planilha. Confira se o arquivo está na pasta conteudo.")
+        st.stop()
+    dados = carregar_dados(str(ARQUIVO_DADOS))
+    st.sidebar.caption("Usando a planilha padrão do projeto (Tabela 1.1.1 — IBGE).")
+
 if dados.empty:
     st.error("A planilha não contém dados no formato esperado.")
     st.stop()
@@ -166,7 +195,7 @@ else:
     else:
         st.info("Escolha pelo menos um grupo para montar o gráfico.")
 
-st.subheader("Evolucao ao longo dos anos")
+st.subheader("Evolução ao longo dos anos")
 if estados:
     historico = dados[dados["Localidade"].isin(estados + ["Brasil"])].copy()
     historico_longo = historico.melt(
@@ -209,15 +238,76 @@ if estados:
     fig_box.update_layout(showlegend=False)
     st.plotly_chart(fig_box, use_container_width=True)
 
+st.divider()
 st.subheader("Por que acompanhar a economia do cuidado?")
-texto, imagem = st.columns([1.4, 1])
-with texto:
-    st.write(
-        "O trabalho de cuidar de pessoas e manter a casa funcionando sustenta a vida cotidiana, "
-        "mas nem sempre é reconhecido nas decisões públicas. A diferença de horas entre grupos "
-        "ajuda gestores a discutir serviços de cuidado, políticas de apoio às famílias e divisão "
-        "mais equilibrada das tarefas."
-    )
-  
+st.write(
+    "O trabalho de cuidar de pessoas e manter a casa funcionando sustenta a vida cotidiana, "
+    "mas nem sempre é reconhecido nas decisões públicas. A diferença de horas entre grupos "
+    "ajuda gestores a discutir serviços de cuidado, políticas de apoio às famílias e divisão "
+    "mais equilibrada das tarefas."
+)
 
 
+# --- Reportagens -----------------------------------------------------------
+PASTA_IMAGENS = Path(__file__).parent / "imagens"
+
+REPORTAGENS = [
+    {
+        "tema": "Carga Mental Feminina",
+        "titulo": "PNAD: mulheres gastam quase o dobro de tempo no serviço doméstico",
+        "veiculo": "Agência Brasil",
+        "data": "11/08/2023",
+        "resumo": (
+            "Pela PNAD Contínua 2022, as mulheres dedicam cerca de 21,3 horas por semana aos "
+            "afazeres domésticos e ao cuidado de pessoas, contra 11,7 horas dos homens. Além das "
+            "horas visíveis, pesa a tarefa invisível de planejar e lembrar de tudo — a chamada "
+            "carga mental."
+        ),
+        "link": "https://agenciabrasil.ebc.com.br/geral/noticia/2023-08/pnad-mulheres-gastam-quase-o-dobro-de-tempo-no-servico-domestico",
+        "imagem": "carga-mental-feminina.jpg",
+        "credito_imagem": "Foto: valtercirillo/Pixabay — publicada por Agência Brasil",
+    },
+    {
+        "tema": "Economia do Cuidado",
+        "titulo": "Batizado Brasil que Cuida, Plano Nacional de Cuidados sairá em breve",
+        "veiculo": "Agência Brasil",
+        "data": "19/03/2025",
+        "resumo": (
+            "O governo federal detalhou o Plano Nacional de Cuidados, que organiza serviços de "
+            "cuidado para crianças, idosos e pessoas com deficiência. A proposta reconhece o "
+            "cuidado como trabalho e busca reduzir a sobrecarga que hoje recai sobre as mulheres."
+        ),
+        "link": "https://agenciabrasil.ebc.com.br/direitos-humanos/noticia/2025-03/batizado-brasil-que-cuida-plano-nacional-de-cuidados-saira-em-breve",
+        "imagem": "economia-do-cuidado.jpg",
+        "credito_imagem": "Foto: Rafa Neddermeyer/Agência Brasil",
+    },
+]
+
+st.subheader("Reportagens sobre o tema")
+st.caption(
+    "Matérias que ajudam a interpretar os números do painel. As imagens são as próprias fotos "
+    "das reportagens, com os créditos originais."
+)
+
+colunas_reportagens = st.columns(len(REPORTAGENS))
+for coluna, reportagem in zip(colunas_reportagens, REPORTAGENS):
+    with coluna:
+        st.markdown(f"**{reportagem['tema']}**")
+
+        caminho_imagem = PASTA_IMAGENS / reportagem["imagem"]
+        if caminho_imagem.exists():
+            st.image(str(caminho_imagem), use_container_width=True)
+        else:
+            st.info("Imagem não encontrada na pasta imagens.")
+        st.caption(reportagem["credito_imagem"])
+
+        st.markdown(f"##### {reportagem['titulo']}")
+        st.write(reportagem["resumo"])
+        st.caption(f"Fonte: {reportagem['veiculo']} — {reportagem['data']}")
+        st.markdown(f"[Ler a reportagem completa]({reportagem['link']})")
+
+st.markdown(
+    '<div class="note">Fonte dos dados do painel: IBGE — PNAD Contínua, Tabela 1.1.1 '
+    "(número médio de horas semanais dedicadas aos cuidados de pessoas e/ou afazeres domésticos).</div>",
+    unsafe_allow_html=True,
+)
